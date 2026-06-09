@@ -33,6 +33,7 @@ export default function FaceCanvas({ design }: Props) {
   const designRef = useRef<Design | null>(null)
   const rafRef = useRef<number>(0)
   const lastVideoTimeRef = useRef(-1)
+  const lastLandmarksRef = useRef<{ x: number; y: number }[] | null>(null)
 
   // design が変わっても RAF ループを再起動しない
   useEffect(() => {
@@ -111,15 +112,23 @@ export default function FaceCanvas({ design }: Props) {
       ctx.drawImage(video, -w, 0, w, h)
       ctx.restore()
 
+      // 新しいフレームのときだけ検出、結果はキャッシュして毎フレーム描画
       if (landmarker && video.currentTime !== lastVideoTimeRef.current) {
         lastVideoTimeRef.current = video.currentTime
         const result = landmarker.detectForVideo(video, performance.now())
-        const img = designImgRef.current
-        const d = designRef.current
-        if (result.faceLandmarks.length > 0 && img && d) {
-          const lm = result.faceLandmarks[0].map(p => ({ x: 1 - p.x, y: p.y }))
-          drawDesign(ctx, lm, img, d.type, w, h)
+        if (result.faceLandmarks.length > 0) {
+          lastLandmarksRef.current = result.faceLandmarks[0].map(p => ({ x: 1 - p.x, y: p.y }))
+        } else {
+          lastLandmarksRef.current = null
         }
+      }
+
+      // キャッシュされたランドマークで毎フレーム描画
+      const img = designImgRef.current
+      const d = designRef.current
+      const lm = lastLandmarksRef.current
+      if (lm && img && d) {
+        drawDesign(ctx, lm, img, d.type, w, h)
       }
 
       rafRef.current = requestAnimationFrame(render)
