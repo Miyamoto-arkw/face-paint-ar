@@ -180,7 +180,13 @@ function getActiveSet(type: Design['type'], side: Side): Set<number> {
 function getActiveTriangles(type: Design['type'], side: Side): [number, number, number][] {
   if (type === 'full') return FACE_TRIANGLES
   const set = getActiveSet(type, side)
-  // 三角形の全頂点がセット内にある場合のみ使用
+  if (type === 'eye') {
+    // 目元はランドマーク数が少ないので2頂点以上で判定
+    return FACE_TRIANGLES.filter(([i0, i1, i2]) => {
+      const count = (set.has(i0) ? 1 : 0) + (set.has(i1) ? 1 : 0) + (set.has(i2) ? 1 : 0)
+      return count >= 2
+    })
+  }
   return FACE_TRIANGLES.filter(([i0, i1, i2]) => set.has(i0) && set.has(i1) && set.has(i2))
 }
 
