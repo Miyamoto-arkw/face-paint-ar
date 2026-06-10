@@ -116,85 +116,96 @@ export default function FaceCanvas({ design, side }: Props) {
   )
 }
 
-// ---- ランドマーク定義 ----
+// ---- ランドマークセット定義 ----
 
-// 左頬（頬骨より下〜口角まで、顎・唇は含まない）
 const LEFT_LOWER_CHEEK = new Set([
-  // 頬骨ライン下縁
   116, 117, 118, 101, 50, 36, 205, 187,
-  // 頬の中央
   192, 213, 214, 210, 211, 32, 208,
-  // 鼻翼〜口角止まり（唇・顎は除外）
   207, 216, 215, 206, 203,
-  // 内側補完
   147, 123, 50, 187, 205, 36,
 ])
 
-// 右頬（頬骨より下〜口角まで、顎・唇は含まない）
 const RIGHT_LOWER_CHEEK = new Set([
-  // 頬骨ライン下縁
   345, 346, 347, 330, 280, 266, 425, 411,
-  // 頬の中央
   416, 433, 434, 430, 431, 261, 436,
-  // 鼻翼〜口角止まり（唇・顎は除外）
   427, 435, 426, 423,
-  // 内側補完
   376, 352, 280, 411, 425, 266,
 ])
 
-// 左目尻〜こめかみ（目の外角から外側）
 const LEFT_OUTER_EYE_TEMPLE = new Set([
-  // 目の外角
   33, 246, 161, 160, 159, 158, 157, 173,
-  // 外角〜こめかみ橋渡し
   130, 226, 247, 30, 29, 27, 28, 56, 190, 243,
-  // こめかみ
   21, 54, 162, 127, 234, 93,
-  // 眉尻
   46, 53, 52, 65, 55,
 ])
 
-// 右目尻〜こめかみ
 const RIGHT_OUTER_EYE_TEMPLE = new Set([
-  // 目の外角
   263, 466, 388, 387, 386, 385, 384, 398,
-  // 外角〜こめかみ橋渡し
   359, 446, 467, 260, 259, 257, 258, 286, 414, 463,
-  // こめかみ
   251, 284, 389, 356, 454, 323,
-  // 眉尻
   276, 283, 282, 295, 285,
 ])
 
+function getActiveSet(type: Design['type'], side: Side): Set<number> {
+  if (type === 'full') return new Set(Array.from({ length: 468 }, (_, i) => i))
+  if (type === 'cheek') return side === 'left' ? LEFT_LOWER_CHEEK : RIGHT_LOWER_CHEEK
+  if (type === 'eye') return side === 'left' ? LEFT_OUTER_EYE_TEMPLE : RIGHT_OUTER_EYE_TEMPLE
+  return new Set()
+}
+
 function getActiveTriangles(type: Design['type'], side: Side): [number, number, number][] {
   if (type === 'full') return FACE_TRIANGLES
+  const set = getActiveSet(type, side)
+  // 三角形の全頂点がセット内にある場合のみ使用
+  return FACE_TRIANGLES.filter(([i0, i1, i2]) => set.has(i0) && set.has(i1) && set.has(i2))
+}
 
-  if (type === 'cheek') {
-    const set = side === 'left' ? LEFT_LOWER_CHEEK : RIGHT_LOWER_CHEEK
-    return FACE_TRIANGLES.filter(([i0, i1, i2]) => set.has(i0) && set.has(i1) && set.has(i2))
+// ---- 顔ローカル座標系 ----
+
+interface FaceAxes {
+  right: { x: number; y: number }  // 顔の水平右方向（ミラー後）
+  up: { x: number; y: number }     // 顔の上方向
+  center: { x: number; y: number }
+}
+
+function getFaceAxes(lm: { x: number; y: number }[], w: number, h: number): FaceAxes {
+  const pt = (i: number) => ({ x: lm[i].x * w, y: lm[i].y * h })
+  const chin = pt(152)
+  const forehead = pt(10)
+  const leftCheek = pt(234)  // ミラー後は画面左
+  const rightCheek = pt(454) // ミラー後は画面右
+
+  // 上方向: 顎→額
+  const upDx = forehead.x - chin.x
+  const upDy = forehead.y - chin.y
+  const upLen = Math.hypot(upDx, upDy) || 1
+
+  // 右方向: 左頬→右頬
+  const rtDx = rightCheek.x - leftCheek.x
+  const rtDy = rightCheek.y - leftCheek.y
+  const rtLen = Math.hypot(rtDx, rtDy) || 1
+
+  return {
+    up: { x: upDx / upLen, y: upDy / upLen },
+    right: { x: rtDx / rtLen, y: rtDy / rtLen },
+    center: {
+      x: (leftCheek.x + rightCheek.x) / 2,
+      y: (forehead.y + chin.y) / 2,
+    },
   }
+}
 
-  if (type === 'eye') {
-    const set = side === 'left' ? LEFT_OUTER_EYE_TEMPLE : RIGHT_OUTER_EYE_TEMPLE
-    return FACE_TRIANGLES.filter(([i0, i1, i2]) => set.has(i0) && set.has(i1) && set.has(i2))
+// ランドマーク1点を顔ローカル座標（u=横, v=縦上正）に投影
+function projectLocal(px: number, py: number, axes: FaceAxes) {
+  const dx = px - axes.center.x
+  const dy = py - axes.center.y
+  return {
+    u: dx * axes.right.x + dy * axes.right.y,
+    v: -(dx * axes.up.x + dy * axes.up.y), // 画面y=下なので上方向を正に反転
   }
-
-  return FACE_TRIANGLES
 }
 
 // ---- 描画 ----
-
-function getFaceBounds(lm: { x: number; y: number }[], w: number, h: number) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const p of lm) {
-    const px = p.x * w, py = p.y * h
-    if (px < minX) minX = px
-    if (py < minY) minY = py
-    if (px > maxX) maxX = px
-    if (py > maxY) maxY = py
-  }
-  return { minX, minY, width: maxX - minX, height: maxY - minY }
-}
 
 function drawAffineTriangle(
   ctx: CanvasRenderingContext2D,
@@ -235,21 +246,43 @@ function drawMeshWarp(
   w: number,
   h: number
 ) {
-  const bounds = getFaceBounds(lm, w, h)
-  const iw = img.width, ih = img.height
+  const axes = getFaceAxes(lm, w, h)
+  const activeSet = getActiveSet(type, side)
   const triangles = getActiveTriangles(type, side)
+
+  // アクティブランドマークの顔ローカル座標 bounding box
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
+  for (const idx of activeSet) {
+    if (idx >= lm.length) continue
+    const { u, v } = projectLocal(lm[idx].x * w, lm[idx].y * h, axes)
+    if (u < minU) minU = u
+    if (u > maxU) maxU = u
+    if (v < minV) minV = v
+    if (v > maxV) maxV = v
+  }
+  const uRange = maxU - minU || 1
+  const vRange = maxV - minV || 1
+  const iw = img.width, ih = img.height
 
   for (const [i0, i1, i2] of triangles) {
     if (i0 >= lm.length || i1 >= lm.length || i2 >= lm.length) continue
+
     const dx0 = lm[i0].x * w, dy0 = lm[i0].y * h
     const dx1 = lm[i1].x * w, dy1 = lm[i1].y * h
     const dx2 = lm[i2].x * w, dy2 = lm[i2].y * h
-    const sx0 = ((lm[i0].x * w - bounds.minX) / bounds.width) * iw
-    const sy0 = ((lm[i0].y * h - bounds.minY) / bounds.height) * ih
-    const sx1 = ((lm[i1].x * w - bounds.minX) / bounds.width) * iw
-    const sy1 = ((lm[i1].y * h - bounds.minY) / bounds.height) * ih
-    const sx2 = ((lm[i2].x * w - bounds.minX) / bounds.width) * iw
-    const sy2 = ((lm[i2].y * h - bounds.minY) / bounds.height) * ih
+
+    // 顔ローカル座標 → 画像UV（vは上=0、下=height）
+    const p0 = projectLocal(dx0, dy0, axes)
+    const p1 = projectLocal(dx1, dy1, axes)
+    const p2 = projectLocal(dx2, dy2, axes)
+
+    const sx0 = ((p0.u - minU) / uRange) * iw
+    const sy0 = ((maxV - p0.v) / vRange) * ih  // v反転: 上=0
+    const sx1 = ((p1.u - minU) / uRange) * iw
+    const sy1 = ((maxV - p1.v) / vRange) * ih
+    const sx2 = ((p2.u - minU) / uRange) * iw
+    const sy2 = ((maxV - p2.v) / vRange) * ih
+
     drawAffineTriangle(ctx, img, sx0, sy0, sx1, sy1, sx2, sy2, dx0, dy0, dx1, dy1, dx2, dy2)
   }
 }
