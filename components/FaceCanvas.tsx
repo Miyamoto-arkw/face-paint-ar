@@ -287,12 +287,15 @@ function drawMeshWarp(
     const p2 = projectLocal(dx2, dy2, axes)
 
     // v軸: minV=顔上端=画像上(0), maxV=顔下端=画像下(ih)
-    const sx0 = ((p0.u - minU) / uRange) * iw
-    const sy0 = ((p0.v - minV) / vRange) * ih
-    const sx1 = ((p1.u - minU) / uRange) * iw
-    const sy1 = ((p1.v - minV) / vRange) * ih
-    const sx2 = ((p2.u - minU) / uRange) * iw
-    const sy2 = ((p2.v - minV) / vRange) * ih
+    // 右側は画像をU軸反転（左右対称）
+    const flipU = type !== 'full' && side === 'right'
+    const uToSx = (u: number) => flipU
+      ? ((maxU - u) / uRange) * iw
+      : ((u - minU) / uRange) * iw
+
+    const sx0 = uToSx(p0.u); const sy0 = ((p0.v - minV) / vRange) * ih
+    const sx1 = uToSx(p1.u); const sy1 = ((p1.v - minV) / vRange) * ih
+    const sx2 = uToSx(p2.u); const sy2 = ((p2.v - minV) / vRange) * ih
 
     drawAffineTriangle(ctx, img, sx0, sy0, sx1, sy1, sx2, sy2, dx0, dy0, dx1, dy1, dx2, dy2)
   }
