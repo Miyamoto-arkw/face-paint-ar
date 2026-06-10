@@ -142,51 +142,40 @@ const RIGHT_LOWER_CHEEK = new Set([
   423, 426, 436,
 ])
 
-// 左目尻〜こめかみ〜耳
-const LEFT_OUTER_EYE_TEMPLE = new Set([
-  // 目尻外角
-  33, 130, 226, 247, 30, 29, 27, 28, 56, 190, 243,
-  // こめかみ
-  21, 54, 162, 127,
-  // こめかみ〜耳上
-  103, 67, 109,
-  // 耳周辺（顔輪郭）
-  234, 93, 132,
-  // 頬骨〜耳ライン
-  116, 123, 147,
-])
+// 目尻〜こめかみ〜耳の境界ポリゴン（時計回り）
+// ポリゴンでクリップし、その中に全三角形を描画する
+const LEFT_EYE_TEMPLE_POLYGON = [
+  33,   // 目尻
+  173, 157, 158, 159, 160, 161, 246, // 目の上縁外側
+  130, 247, 30, 29, 27, 28, 56,      // 目尻〜こめかみ上
+  162, 21, 54, 103, 67, 109,         // こめかみ〜額側面
+  234, 93, 132,                       // 耳周辺
+  116, 123, 147, 187, 205,           // 頬骨ライン（下縁）
+]
 
-// 右目尻〜こめかみ〜耳
-const RIGHT_OUTER_EYE_TEMPLE = new Set([
-  // 目尻外角
-  263, 359, 446, 467, 260, 259, 257, 258, 286, 414, 463,
-  // こめかみ
-  251, 284, 389, 356,
-  // こめかみ〜耳上
-  332, 297, 338,
-  // 耳周辺（顔輪郭）
-  454, 323, 361,
-  // 頬骨〜耳ライン
-  345, 352, 376,
-])
+const RIGHT_EYE_TEMPLE_POLYGON = [
+  263,  // 目尻
+  398, 384, 385, 386, 387, 388, 466, // 目の上縁外側
+  359, 467, 260, 259, 257, 258, 286, // 目尻〜こめかみ上
+  389, 251, 284, 332, 297, 338,      // こめかみ〜額側面
+  454, 323, 361,                      // 耳周辺
+  345, 352, 376, 411, 425,           // 頬骨ライン（下縁）
+]
 
 function getActiveSet(type: Design['type'], side: Side): Set<number> {
   if (type === 'full') return new Set(Array.from({ length: 468 }, (_, i) => i))
   if (type === 'cheek') return side === 'left' ? LEFT_LOWER_CHEEK : RIGHT_LOWER_CHEEK
-  if (type === 'eye') return side === 'left' ? LEFT_OUTER_EYE_TEMPLE : RIGHT_OUTER_EYE_TEMPLE
-  return new Set()
+  // eye は境界ポリゴン方式なのでセット不要
+  return new Set(Array.from({ length: 468 }, (_, i) => i))
+}
+
+function getEyePolygon(side: Side) {
+  return side === 'left' ? LEFT_EYE_TEMPLE_POLYGON : RIGHT_EYE_TEMPLE_POLYGON
 }
 
 function getActiveTriangles(type: Design['type'], side: Side): [number, number, number][] {
-  if (type === 'full') return FACE_TRIANGLES
+  if (type === 'full' || type === 'eye') return FACE_TRIANGLES
   const set = getActiveSet(type, side)
-  if (type === 'eye') {
-    // 目元はランドマーク数が少ないので2頂点以上で判定
-    return FACE_TRIANGLES.filter(([i0, i1, i2]) => {
-      const count = (set.has(i0) ? 1 : 0) + (set.has(i1) ? 1 : 0) + (set.has(i2) ? 1 : 0)
-      return count >= 2
-    })
-  }
   return FACE_TRIANGLES.filter(([i0, i1, i2]) => set.has(i0) && set.has(i1) && set.has(i2))
 }
 
@@ -277,46 +266,78 @@ function drawMeshWarp(
   h: number
 ) {
   const axes = getFaceAxes(lm, w, h)
+  const flipU = type !== 'full' && side === 'right'
+
+  // 目元: 境界ポリゴンでクリップ → その中に全三角形を描画
+  if (type === 'eye') {
+    const polygon = getEyePolygon(side)
+    const polyPts = polygon.map(i => ({ x: lm[i].x * w, y: lm[i].y * h }))
+
+    // ポリゴンの顔ローカル bounding box
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
+    for (const pt of polyPts) {
+      const { u, v } = projectLocal(pt.x, pt.y, axes)
+      if (u < minU) minU = u; if (u > maxU) maxU = u
+      if (v < minV) minV = v; if (v > maxV) maxV = v
+    }
+    const uRange = maxU - minU || 1
+    const vRange = maxV - minV || 1
+    const iw = img.width, ih = img.height
+    const uToSx = (u: number) => flipU ? ((maxU - u) / uRange) * iw : ((u - minU) / uRange) * iw
+
+    // ポリゴンクリップを一度だけ設定
+    ctx.save()
+    ctx.beginPath()
+    ctx.moveTo(polyPts[0].x, polyPts[0].y)
+    for (let i = 1; i < polyPts.length; i++) ctx.lineTo(polyPts[i].x, polyPts[i].y)
+    ctx.closePath()
+    ctx.clip()
+
+    // クリップ内で全三角形を描画
+    for (const [i0, i1, i2] of FACE_TRIANGLES) {
+      if (i0 >= lm.length || i1 >= lm.length || i2 >= lm.length) continue
+      const dx0 = lm[i0].x * w, dy0 = lm[i0].y * h
+      const dx1 = lm[i1].x * w, dy1 = lm[i1].y * h
+      const dx2 = lm[i2].x * w, dy2 = lm[i2].y * h
+      const p0 = projectLocal(dx0, dy0, axes)
+      const p1 = projectLocal(dx1, dy1, axes)
+      const p2 = projectLocal(dx2, dy2, axes)
+      const sx0 = uToSx(p0.u); const sy0 = ((p0.v - minV) / vRange) * ih
+      const sx1 = uToSx(p1.u); const sy1 = ((p1.v - minV) / vRange) * ih
+      const sx2 = uToSx(p2.u); const sy2 = ((p2.v - minV) / vRange) * ih
+      drawAffineTriangle(ctx, img, sx0, sy0, sx1, sy1, sx2, sy2, dx0, dy0, dx1, dy1, dx2, dy2)
+    }
+    ctx.restore()
+    return
+  }
+
+  // 頬・全顔: ランドマークセットで三角形フィルタ
   const activeSet = getActiveSet(type, side)
   const triangles = getActiveTriangles(type, side)
 
-  // アクティブランドマークの顔ローカル座標 bounding box
   let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
   for (const idx of activeSet) {
     if (idx >= lm.length) continue
     const { u, v } = projectLocal(lm[idx].x * w, lm[idx].y * h, axes)
-    if (u < minU) minU = u
-    if (u > maxU) maxU = u
-    if (v < minV) minV = v
-    if (v > maxV) maxV = v
+    if (u < minU) minU = u; if (u > maxU) maxU = u
+    if (v < minV) minV = v; if (v > maxV) maxV = v
   }
   const uRange = maxU - minU || 1
   const vRange = maxV - minV || 1
   const iw = img.width, ih = img.height
+  const uToSx = (u: number) => flipU ? ((maxU - u) / uRange) * iw : ((u - minU) / uRange) * iw
 
   for (const [i0, i1, i2] of triangles) {
     if (i0 >= lm.length || i1 >= lm.length || i2 >= lm.length) continue
-
     const dx0 = lm[i0].x * w, dy0 = lm[i0].y * h
     const dx1 = lm[i1].x * w, dy1 = lm[i1].y * h
     const dx2 = lm[i2].x * w, dy2 = lm[i2].y * h
-
-    // 顔ローカル座標 → 画像UV（vは上=0、下=height）
     const p0 = projectLocal(dx0, dy0, axes)
     const p1 = projectLocal(dx1, dy1, axes)
     const p2 = projectLocal(dx2, dy2, axes)
-
-    // v軸: minV=顔上端=画像上(0), maxV=顔下端=画像下(ih)
-    // 右側は画像をU軸反転（左右対称）
-    const flipU = type !== 'full' && side === 'right'
-    const uToSx = (u: number) => flipU
-      ? ((maxU - u) / uRange) * iw
-      : ((u - minU) / uRange) * iw
-
     const sx0 = uToSx(p0.u); const sy0 = ((p0.v - minV) / vRange) * ih
     const sx1 = uToSx(p1.u); const sy1 = ((p1.v - minV) / vRange) * ih
     const sx2 = uToSx(p2.u); const sy2 = ((p2.v - minV) / vRange) * ih
-
     drawAffineTriangle(ctx, img, sx0, sy0, sx1, sy1, sx2, sy2, dx0, dy0, dx1, dy1, dx2, dy2)
   }
 }
