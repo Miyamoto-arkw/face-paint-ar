@@ -118,18 +118,28 @@ export default function FaceCanvas({ design, side }: Props) {
 
 // ---- ランドマークセット定義 ----
 
+// 左頬（頬骨下〜口角上、コンパクトな範囲）
 const LEFT_LOWER_CHEEK = new Set([
-  116, 117, 118, 101, 50, 36, 205, 187,
-  192, 213, 214, 210, 211, 32, 208,
-  207, 216, 215, 206, 203,
-  147, 123, 50, 187, 205, 36,
+  // 頬の核心部
+  117, 118, 101, 50, 205, 187,
+  192, 213, 214, 210, 211,
+  207, 216, 215,
+  // 上端（頬骨）
+  116, 123, 147,
+  // 内側（鼻寄り）
+  203, 206, 216,
 ])
 
+// 右頬（頬骨下〜口角上、コンパクトな範囲）
 const RIGHT_LOWER_CHEEK = new Set([
-  345, 346, 347, 330, 280, 266, 425, 411,
-  416, 433, 434, 430, 431, 261, 436,
-  427, 435, 426, 423,
-  376, 352, 280, 411, 425, 266,
+  // 頬の核心部
+  346, 347, 330, 280, 425, 411,
+  416, 433, 434, 430, 431,
+  427, 436, 435,
+  // 上端（頬骨）
+  345, 352, 376,
+  // 内側（鼻寄り）
+  423, 426, 436,
 ])
 
 const LEFT_OUTER_EYE_TEMPLE = new Set([
@@ -276,12 +286,13 @@ function drawMeshWarp(
     const p1 = projectLocal(dx1, dy1, axes)
     const p2 = projectLocal(dx2, dy2, axes)
 
+    // v軸: minV=顔上端=画像上(0), maxV=顔下端=画像下(ih)
     const sx0 = ((p0.u - minU) / uRange) * iw
-    const sy0 = ((maxV - p0.v) / vRange) * ih  // v反転: 上=0
+    const sy0 = ((p0.v - minV) / vRange) * ih
     const sx1 = ((p1.u - minU) / uRange) * iw
-    const sy1 = ((maxV - p1.v) / vRange) * ih
+    const sy1 = ((p1.v - minV) / vRange) * ih
     const sx2 = ((p2.u - minU) / uRange) * iw
-    const sy2 = ((maxV - p2.v) / vRange) * ih
+    const sy2 = ((p2.v - minV) / vRange) * ih
 
     drawAffineTriangle(ctx, img, sx0, sy0, sx1, sy1, sx2, sy2, dx0, dy0, dx1, dy1, dx2, dy2)
   }
