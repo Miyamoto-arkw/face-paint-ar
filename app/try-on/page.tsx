@@ -5,13 +5,14 @@ import dynamic from 'next/dynamic'
 import DesignPicker from '@/components/DesignPicker'
 import { supabase } from '@/lib/supabase'
 import type { Design } from '@/types'
+import type { Side } from '@/components/FaceCanvas'
 
-// FaceCanvasはSSR不可（WebGL・getUserMedia使用）
 const FaceCanvas = dynamic(() => import('@/components/FaceCanvas'), { ssr: false })
 
 export default function TryOnPage() {
   const [designs, setDesigns] = useState<Design[]>([])
   const [selected, setSelected] = useState<Design | null>(null)
+  const [side, setSide] = useState<Side>('left')
 
   useEffect(() => {
     supabase.from('designs').select('*').order('created_at', { ascending: false })
@@ -23,8 +24,14 @@ export default function TryOnPage() {
       <h1 className="text-center text-2xl font-bold mb-6 text-pink-400">
         フェイスペイント体験
       </h1>
-      <FaceCanvas design={selected} />
-      <DesignPicker designs={designs} selected={selected} onSelect={setSelected} />
+      <FaceCanvas design={selected} side={side} />
+      <DesignPicker
+        designs={designs}
+        selected={selected}
+        side={side}
+        onSelect={setSelected}
+        onSideChange={setSide}
+      />
     </main>
   )
 }

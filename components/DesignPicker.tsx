@@ -2,11 +2,14 @@
 
 import Image from 'next/image'
 import type { Design, DesignType } from '@/types'
+import type { Side } from './FaceCanvas'
 
 interface Props {
   designs: Design[]
   selected: Design | null
+  side: Side
   onSelect: (design: Design | null) => void
+  onSideChange: (side: Side) => void
 }
 
 const TYPE_LABEL: Record<DesignType, string> = {
@@ -15,14 +18,44 @@ const TYPE_LABEL: Record<DesignType, string> = {
   full: '全顔',
 }
 
-export default function DesignPicker({ designs, selected, onSelect }: Props) {
+export default function DesignPicker({ designs, selected, side, onSelect, onSideChange }: Props) {
   const grouped = designs.reduce<Record<DesignType, Design[]>>(
     (acc, d) => { acc[d.type].push(d); return acc },
     { cheek: [], eye: [], full: [] }
   )
 
+  const showSideSwitch = selected && (selected.type === 'cheek' || selected.type === 'eye')
+
   return (
     <div className="w-full max-w-lg mx-auto mt-4 space-y-4">
+
+      {/* 左右スイッチ */}
+      {showSideSwitch && (
+        <div className="flex justify-center gap-2">
+          <button
+            onClick={() => onSideChange('left')}
+            className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${
+              side === 'left'
+                ? 'bg-pink-500 text-white shadow-md'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            ← 左
+          </button>
+          <button
+            onClick={() => onSideChange('right')}
+            className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${
+              side === 'right'
+                ? 'bg-pink-500 text-white shadow-md'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            右 →
+          </button>
+        </div>
+      )}
+
+      {/* 絵柄一覧 */}
       {(Object.keys(grouped) as DesignType[]).map(type => (
         grouped[type].length > 0 && (
           <div key={type}>
@@ -35,7 +68,7 @@ export default function DesignPicker({ designs, selected, onSelect }: Props) {
                   className={`relative w-16 h-16 rounded-xl border-2 overflow-hidden transition-all ${
                     selected?.id === d.id
                       ? 'border-pink-500 scale-105 shadow-md'
-                      : 'border-gray-200 hover:border-pink-300'
+                      : 'border-gray-700 hover:border-pink-400'
                   }`}
                 >
                   <Image src={d.image_url} alt={d.name} fill className="object-cover" />
@@ -45,8 +78,9 @@ export default function DesignPicker({ designs, selected, onSelect }: Props) {
           </div>
         )
       ))}
+
       {designs.length === 0 && (
-        <p className="text-sm text-gray-400 text-center py-4">絵柄がまだありません</p>
+        <p className="text-sm text-gray-500 text-center py-4">絵柄がまだありません</p>
       )}
     </div>
   )
