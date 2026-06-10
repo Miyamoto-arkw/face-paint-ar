@@ -2,27 +2,11 @@
 
 import { useEffect, useRef } from 'react'
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
+import { FACE_TRIANGLES } from '@/lib/faceMeshTriangles'
 import type { Design } from '@/types'
 
 interface Props {
   design: Design | null
-}
-
-const LANDMARKS = {
-  LEFT_CHEEK: 234,
-  RIGHT_CHEEK: 454,
-  LEFT_EYE_OUTER: 33,
-  LEFT_EYE_INNER: 133,
-  LEFT_EYE_TOP: 159,
-  LEFT_EYE_BOTTOM: 145,
-  RIGHT_EYE_OUTER: 263,
-  RIGHT_EYE_INNER: 362,
-  RIGHT_EYE_TOP: 386,
-  RIGHT_EYE_BOTTOM: 374,
-  FACE_TOP: 10,
-  FACE_BOTTOM: 152,
-  FACE_LEFT: 234,
-  FACE_RIGHT: 454,
 }
 
 export default function FaceCanvas({ design }: Props) {
@@ -35,7 +19,6 @@ export default function FaceCanvas({ design }: Props) {
   const lastVideoTimeRef = useRef(-1)
   const lastLandmarksRef = useRef<{ x: number; y: number }[] | null>(null)
 
-  // design が変わっても RAF ループを再起動しない
   useEffect(() => {
     designRef.current = design
     if (!design) {
@@ -49,7 +32,6 @@ export default function FaceCanvas({ design }: Props) {
     img.onerror = () => { designImgRef.current = null }
   }, [design])
 
-  // MediaPipe 初期化（一度だけ）
   useEffect(() => {
     let destroyed = false
     async function init() {
@@ -71,7 +53,6 @@ export default function FaceCanvas({ design }: Props) {
     return () => { destroyed = true }
   }, [])
 
-  // カメラ起動（一度だけ）
   useEffect(() => {
     async function startCamera() {
       try {
@@ -92,7 +73,6 @@ export default function FaceCanvas({ design }: Props) {
     }
   }, [])
 
-  // レンダリングループ（一度だけ起動）
   useEffect(() => {
     function render() {
       const video = videoRef.current
@@ -107,28 +87,27 @@ export default function FaceCanvas({ design }: Props) {
       const w = canvas.width
       const h = canvas.height
 
+      // ミラー描画
       ctx.save()
       ctx.scale(-1, 1)
       ctx.drawImage(video, -w, 0, w, h)
       ctx.restore()
 
-      // 新しいフレームのときだけ検出、結果はキャッシュして毎フレーム描画
+      // 新フレームのみ検出
       if (landmarker && video.currentTime !== lastVideoTimeRef.current) {
         lastVideoTimeRef.current = video.currentTime
         const result = landmarker.detectForVideo(video, performance.now())
-        if (result.faceLandmarks.length > 0) {
-          lastLandmarksRef.current = result.faceLandmarks[0].map(p => ({ x: 1 - p.x, y: p.y }))
-        } else {
-          lastLandmarksRef.current = null
-        }
+        lastLandmarksRef.current = result.faceLandmarks.length > 0
+          ? result.faceLandmarks[0].map(p => ({ x: 1 - p.x, y: p.y }))
+          : null
       }
 
-      // キャッシュされたランドマークで毎フレーム描画
+      // メッシュワープ描画
       const img = designImgRef.current
       const d = designRef.current
       const lm = lastLandmarksRef.current
       if (lm && img && d) {
-        drawDesign(ctx, lm, img, d.type, w, h)
+        drawMeshWarp(ctx, lm, img, d.type, w, h)
       }
 
       rafRef.current = requestAnimationFrame(render)
@@ -136,7 +115,7 @@ export default function FaceCanvas({ design }: Props) {
 
     rafRef.current = requestAnimationFrame(render)
     return () => cancelAnimationFrame(rafRef.current)
-  }, []) // 空の依存配列 = 一度だけ
+  }, [])
 
   return (
     <div className="relative w-full max-w-lg mx-auto">
@@ -159,7 +138,57 @@ export default function FaceCanvas({ design }: Props) {
   )
 }
 
-function drawDesign(
+// 顔のバウンディングボックスを計算
+function getFaceBounds(lm: { x: number; y: number }[], w: number, h: number) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of lm) {
+    if (p.x * w < minX) minX = p.x * w
+    if (p.y * h < minY) minY = p.y * h
+    if (p.x * w > maxX) maxX = p.x * w
+    if (p.y * h > maxY) maxY = p.y * h
+  }
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY }
+}
+
+// 三角形1つをアフィン変換で描画
+function drawAffineTriangle(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  // 画像上のソース三角形 (ピクセル座標)
+  sx0: number, sy0: number,
+  sx1: number, sy1: number,
+  sx2: number, sy2: number,
+  // キャンバス上のデスティネーション三角形
+  dx0: number, dy0: number,
+  dx1: number, dy1: number,
+  dx2: number, dy2: number,
+) {
+  // ソース→デスティネーションへのアフィン変換行列を求める
+  const det = sx0 * (sy1 - sy2) + sx1 * (sy2 - sy0) + sx2 * (sy0 - sy1)
+  if (Math.abs(det) < 1e-6) return
+
+  const a = (dx0 * (sy1 - sy2) + dx1 * (sy2 - sy0) + dx2 * (sy0 - sy1)) / det
+  const c = (sx0 * (dx1 - dx2) + sx1 * (dx2 - dx0) + sx2 * (dx0 - dx1)) / det
+  const e = (sx0 * (sy1 * dx2 - sy2 * dx1) + sx1 * (sy2 * dx0 - sy0 * dx2) + sx2 * (sy0 * dx1 - sy1 * dx0)) / det
+
+  const b = (dy0 * (sy1 - sy2) + dy1 * (sy2 - sy0) + dy2 * (sy0 - sy1)) / det
+  const d = (sx0 * (dy1 - dy2) + sx1 * (dy2 - dy0) + sx2 * (dy0 - dy1)) / det
+  const f = (sx0 * (sy1 * dy2 - sy2 * dy1) + sx1 * (sy2 * dy0 - sy0 * dy2) + sx2 * (sy0 * dy1 - sy1 * dy0)) / det
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.moveTo(dx0, dy0)
+  ctx.lineTo(dx1, dy1)
+  ctx.lineTo(dx2, dy2)
+  ctx.closePath()
+  ctx.clip()
+  ctx.setTransform(a, b, c, d, e, f)
+  ctx.globalAlpha = 0.88
+  ctx.drawImage(img, 0, 0, img.width, img.height)
+  ctx.restore()
+}
+
+function drawMeshWarp(
   ctx: CanvasRenderingContext2D,
   lm: { x: number; y: number }[],
   img: HTMLImageElement,
@@ -167,51 +196,77 @@ function drawDesign(
   w: number,
   h: number
 ) {
-  const pt = (idx: number) => ({ x: lm[idx].x * w, y: lm[idx].y * h })
+  const bounds = getFaceBounds(lm, w, h)
+  const iw = img.width
+  const ih = img.height
 
-  ctx.save()
-  ctx.globalAlpha = 0.85
+  // タイプ別にどのランドマーク範囲をマスクするか決める
+  // 全三角形のうち、タイプに応じてフィルタリング
+  const activeTriangles = getActiveTriangles(type)
 
+  for (const [i0, i1, i2] of activeTriangles) {
+    if (i0 >= lm.length || i1 >= lm.length || i2 >= lm.length) continue
+
+    // デスティネーション: キャンバス上の実際の顔座標
+    const dx0 = lm[i0].x * w, dy0 = lm[i0].y * h
+    const dx1 = lm[i1].x * w, dy1 = lm[i1].y * h
+    const dx2 = lm[i2].x * w, dy2 = lm[i2].y * h
+
+    // ソース: 顔バウンディングボックスを基準に画像座標へ正規化
+    const sx0 = ((lm[i0].x * w - bounds.minX) / bounds.width) * iw
+    const sy0 = ((lm[i0].y * h - bounds.minY) / bounds.height) * ih
+    const sx1 = ((lm[i1].x * w - bounds.minX) / bounds.width) * iw
+    const sy1 = ((lm[i1].y * h - bounds.minY) / bounds.height) * ih
+    const sx2 = ((lm[i2].x * w - bounds.minX) / bounds.width) * iw
+    const sy2 = ((lm[i2].y * h - bounds.minY) / bounds.height) * ih
+
+    drawAffineTriangle(ctx, img, sx0, sy0, sx1, sy1, sx2, sy2, dx0, dy0, dx1, dy1, dx2, dy2)
+  }
+}
+
+// タイプ別に使用する三角形を選択
+function getActiveTriangles(type: Design['type']): [number, number, number][] {
   if (type === 'full') {
-    const top = pt(LANDMARKS.FACE_TOP)
-    const bottom = pt(LANDMARKS.FACE_BOTTOM)
-    const left = pt(LANDMARKS.FACE_LEFT)
-    const right = pt(LANDMARKS.FACE_RIGHT)
-    const cx = (left.x + right.x) / 2
-    const cy = (top.y + bottom.y) / 2
-    const fw = (right.x - left.x) * 1.2
-    const fh = (bottom.y - top.y) * 1.15
-    ctx.drawImage(img, cx - fw / 2, cy - fh / 2, fw, fh)
-
-  } else if (type === 'cheek') {
-    const faceW = pt(LANDMARKS.RIGHT_CHEEK).x - pt(LANDMARKS.LEFT_CHEEK).x
-    const cheekSize = faceW * 0.28
-    for (const idx of [LANDMARKS.LEFT_CHEEK, LANDMARKS.RIGHT_CHEEK]) {
-      const c = pt(idx)
-      ctx.drawImage(img, c.x - cheekSize / 2, c.y - cheekSize / 2, cheekSize, cheekSize)
-    }
-
-  } else if (type === 'eye') {
-    const drawEye = (outerIdx: number, innerIdx: number, topIdx: number, bottomIdx: number, flip: boolean) => {
-      const outer = pt(outerIdx)
-      const inner = pt(innerIdx)
-      const top = pt(topIdx)
-      const bottom = pt(bottomIdx)
-      const cx = (outer.x + inner.x) / 2
-      const cy = (outer.y + inner.y) / 2
-      const ew = Math.abs(outer.x - inner.x) * 1.6
-      const eh = Math.abs(bottom.y - top.y) * 3.5
-      const angle = Math.atan2(inner.y - outer.y, inner.x - outer.x)
-      ctx.save()
-      ctx.translate(cx, cy)
-      ctx.rotate(angle)
-      if (flip) ctx.scale(-1, 1)
-      ctx.drawImage(img, -ew / 2, -eh / 2, ew, eh)
-      ctx.restore()
-    }
-    drawEye(LANDMARKS.LEFT_EYE_OUTER, LANDMARKS.LEFT_EYE_INNER, LANDMARKS.LEFT_EYE_TOP, LANDMARKS.LEFT_EYE_BOTTOM, false)
-    drawEye(LANDMARKS.RIGHT_EYE_OUTER, LANDMARKS.RIGHT_EYE_INNER, LANDMARKS.RIGHT_EYE_TOP, LANDMARKS.RIGHT_EYE_BOTTOM, true)
+    return FACE_TRIANGLES
   }
 
-  ctx.restore()
+  if (type === 'cheek') {
+    // 頬エリアのランドマーク（左右の頬骨周辺）
+    const leftCheek = new Set([50, 101, 118, 117, 116, 123, 147, 213, 192, 214, 210, 211, 32, 208, 199, 175, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323, 454, 356, 389, 264, 447, 376, 433, 416, 434, 430, 431, 262, 428, 199])
+    const rightCheek = new Set([280, 330, 347, 346, 345, 352, 376, 433, 421, 443, 439, 440, 261, 436, 199, 175, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323, 454, 356, 389, 264, 447])
+    const cheekSet = new Set([...leftCheek, ...rightCheek,
+      // 左頬コア
+      36, 31, 228, 229, 230, 231, 232, 233, 244, 189, 221, 222, 223, 224, 225, 226, 227,
+      // 右頬コア
+      266, 261, 448, 449, 450, 451, 452, 453, 464, 413, 441, 442, 443, 444, 445, 446, 342,
+      // 共通の頬中央
+      50, 187, 207, 216, 215, 214, 192, 213, 212, 202, 204, 194,
+      280, 411, 427, 436, 435, 434, 416, 433, 432, 422, 424, 418,
+    ])
+    return FACE_TRIANGLES.filter(([i0, i1, i2]) =>
+      cheekSet.has(i0) || cheekSet.has(i1) || cheekSet.has(i2)
+    )
+  }
+
+  if (type === 'eye') {
+    // 目周辺のランドマーク
+    const eyeSet = new Set([
+      // 左目周辺
+      33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246,
+      // 左眉
+      70, 63, 105, 66, 107, 55, 65, 52, 53, 46,
+      // 右目周辺
+      263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466,
+      // 右眉
+      300, 293, 334, 296, 336, 285, 295, 282, 283, 276,
+      // 目頭・目尻付近
+      130, 25, 110, 24, 23, 22, 26, 112, 243, 190, 56, 28, 27, 29, 30, 247,
+      359, 255, 339, 254, 253, 252, 256, 341, 463, 414, 286, 258, 257, 259, 260, 467,
+    ])
+    return FACE_TRIANGLES.filter(([i0, i1, i2]) =>
+      eyeSet.has(i0) || eyeSet.has(i1) || eyeSet.has(i2)
+    )
+  }
+
+  return FACE_TRIANGLES
 }
