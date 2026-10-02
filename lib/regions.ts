@@ -11,34 +11,45 @@ export type Side = 'left' | 'right'
 export const TEXTURE_SIZE = 1024
 
 interface Rect { x: number; y: number; w: number; h: number }
+type Point = readonly [number, number]
+type Polygon = readonly Point[]
 
 /**
- * 配置プリセット（ユーザーの左側、UV座標 0..1）。
- * 右側は u=0.5 で鏡像にして使う。
- * 調整するときはこの数値だけを触ればよい。
+ * 配置範囲（ユーザーの左側、UV座標 0..1 の多角形）。
+ * 絵柄はこの多角形の外接矩形に収めて配置し、多角形の外は切り抜く。
+ * 右側は u=0.5 で鏡像にして使う。調整するときはこの座標だけを触ればよい。
  */
-const LEFT_SIDE_RECTS: Record<Exclude<DesignType, 'full'>, Rect> = {
-  // 目の下〜口角の少し下、鼻翼の横〜フェイスラインまで（上下に大きめ）
-  cheek: { x: 0.61, y: 0.42, w: 0.35, h: 0.36 },
-  // 目尻(u=0.72, v=0.376)を起点に、額側・頬側へ扇状に開く範囲（上下 約±50°）
+const LEFT_SIDE_REGIONS: Record<Exclude<DesignType, 'full'>, Polygon> = {
+  // 目の下〜口角の少し下、鼻翼の横〜フェイスラインまで
+  cheek: [[0.61, 0.42], [0.96, 0.42], [0.96, 0.78], [0.61, 0.78]],
+  // 目尻を頂点に、上側は眉の上を通って額の中央まで、下側は頬まで開く扇形
   // ※顔メッシュはフェイスラインまでなので、耳や髪の上には描けない
-  eye: { x: 0.73, y: 0.13, w: 0.265, h: 0.49 },
+  eye: [
+    [0.74, 0.38],  // 目尻のすぐ外（頂点）
+    [0.745, 0.31], // 眉尻
+    [0.50, 0.215], // 額の中央（眉間の上）
+    [0.50, 0.11],  // 額の中央・上
+    [0.76, 0.13],  // 額の外側・上
+    [0.995, 0.24], // こめかみ上
+    [0.995, 0.62], // フェイスライン（頬の高さ）
+  ],
 }
 
-/** 矩形より絵柄が細いときに寄せる方向（ユーザーの左側基準）。目尻は目の側に寄せる */
-const ANCHOR_X: Record<Exclude<DesignType, 'full'>, 'start' | 'center'> = {
-  cheek: 'center',
-  eye: 'start',
+function boundsOf(poly: Polygon): Rect {
+  const us = poly.map(p => p[0])
+  const vs = poly.map(p => p[1])
+  const x = Math.min(...us), y = Math.min(...vs)
+  return { x, y, w: Math.max(...us) - x, h: Math.max(...vs) - y }
 }
 
-/** 管理画面用：プリセットに一番ぴったり収まる絵柄の縦横比（高さ / 幅） */
+/** 管理画面用：範囲に一番ぴったり収まる絵柄の縦横比（高さ / 幅） */
 export function recommendedAspect(type: Exclude<DesignType, 'full'>): number {
-  const r = LEFT_SIDE_RECTS[type]
+  const r = boundsOf(LEFT_SIDE_REGIONS[type])
   return (r.h * UV_ASPECT) / r.w
 }
 
-/** 画像を縦横比を保ったまま矩形内に収める（UV空間の縦横比補正込み） */
-function fitContain(rect: Rect, imgW: number, imgH: number, anchorX: 'start' | 'center'): Rect {
+/** 画像を縦横比を保ったまま矩形内に中央寄せで収める（UV空間の縦横比補正込み） */
+function fitContain(rect: Rect, imgW: number, imgH: number): Rect {
   // UV上で h/w = (imgH/imgW) / UV_ASPECT にすると実際の顔で元の比率になる
   const targetRatio = imgH / imgW / UV_ASPECT
   let w = rect.w
@@ -47,23 +58,27 @@ function fitContain(rect: Rect, imgW: number, imgH: number, anchorX: 'start' | '
     h = rect.h
     w = h / targetRatio
   }
-  const x = anchorX === 'start' ? rect.x : rect.x + (rect.w - w) / 2
-  return { x, y: rect.y + (rect.h - h) / 2, w, h }
+  return { x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h }
 }
 
-const mirror = (r: Rect): Rect => ({ ...r, x: 1 - r.x - r.w })
+const mirrorRect = (r: Rect): Rect => ({ ...r, x: 1 - r.x - r.w })
 
-function regionRect(type: DesignType, side: Side): Rect {
-  if (type === 'full') return { x: 0, y: 0, w: 1, h: 1 }
-  const r = LEFT_SIDE_RECTS[type]
-  return side === 'left' ? r : mirror(r)
+function regionPolygon(type: Exclude<DesignType, 'full'>, side: Side): Polygon {
+  const poly = LEFT_SIDE_REGIONS[type]
+  return side === 'left' ? poly : poly.map(([u, v]) => [1 - u, v] as const)
 }
 
 /** 絵柄を置く位置（UV）。左側で計算してから右側は鏡像にする */
 function placement(type: DesignType, side: Side, imgW: number, imgH: number): Rect {
-  if (type === 'full') return regionRect(type, side)
-  const p = fitContain(LEFT_SIDE_RECTS[type], imgW, imgH, ANCHOR_X[type])
-  return side === 'left' ? p : mirror(p)
+  if (type === 'full') return { x: 0, y: 0, w: 1, h: 1 }
+  const p = fitContain(boundsOf(LEFT_SIDE_REGIONS[type]), imgW, imgH)
+  return side === 'left' ? p : mirrorRect(p)
+}
+
+function tracePolygon(ctx: CanvasRenderingContext2D, poly: Polygon, size: number) {
+  ctx.beginPath()
+  poly.forEach(([u, v], i) => (i === 0 ? ctx.moveTo(u * size, v * size) : ctx.lineTo(u * size, v * size)))
+  ctx.closePath()
 }
 
 export interface PreparedTexture {
@@ -95,6 +110,11 @@ export function prepareTexture(img: HTMLImageElement, type: DesignType, side: Si
   const flip = !(type !== 'full' && side === 'right')
 
   ctx.save()
+  // 範囲の多角形で切り抜く（目や眉の内側に掛からないように）
+  if (type !== 'full') {
+    tracePolygon(ctx, regionPolygon(type, side), S)
+    ctx.clip()
+  }
   if (flip) {
     ctx.translate((place.x * 2 + place.w) * S, 0)
     ctx.scale(-1, 1)
@@ -146,9 +166,9 @@ export function drawTemplate(ctx: CanvasRenderingContext2D, size: number) {
   ctx.lineWidth = 3
   for (const type of ['cheek', 'eye'] as const) {
     for (const side of ['left', 'right'] as const) {
-      const r = regionRect(type, side)
       ctx.strokeStyle = colors[type]
-      ctx.strokeRect(r.x * size, r.y * size, r.w * size, r.h * size)
+      tracePolygon(ctx, regionPolygon(type, side), size)
+      ctx.stroke()
     }
   }
   ctx.restore()

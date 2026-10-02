@@ -95,7 +95,8 @@ export default function AdminPage() {
         <p>
           範囲いっぱいに使うには、推奨サイズ（幅×高さ）で作成してください：
           頬 600×{Math.round(600 * recommendedAspect('cheek'))}px、
-          目尻〜こめかみ 400×{Math.round(400 * recommendedAspect('eye'))}px（左端が目尻側）
+          目尻〜こめかみ 600×{Math.round(600 * recommendedAspect('eye'))}px
+          （右端が額の中央、左端がこめかみ。目と眉の内側は自動で切り抜かれます。形はテンプレートの青枠を参照）
         </p>
         <p>
           全顔：展開図テンプレートに合わせて描いた1024×1024の透過PNG。
