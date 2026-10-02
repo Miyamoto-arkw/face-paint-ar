@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# copied from node_modules at install/build time
+/public/mediapipe/wasm
+/public/debug-face.jpg

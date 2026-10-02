@@ -4,12 +4,24 @@ import { useEffect, useState, useRef } from 'react'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
 import type { Design, DesignType } from '@/types'
+import { DESIGN_TYPE_LABEL } from '@/types'
+import { drawTemplate } from '@/lib/regions'
 
-const TYPE_OPTIONS: { value: DesignType; label: string }[] = [
-  { value: 'cheek', label: '頬' },
-  { value: 'eye', label: '目元' },
-  { value: 'full', label: '全顔' },
-]
+const TYPE_OPTIONS = (Object.keys(DESIGN_TYPE_LABEL) as DesignType[])
+  .map(value => ({ value, label: DESIGN_TYPE_LABEL[value] }))
+
+/** 全顔用の展開図テンプレートPNGをダウンロード */
+function downloadTemplate() {
+  const size = 1024
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  drawTemplate(canvas.getContext('2d')!, size)
+  const a = document.createElement('a')
+  a.href = canvas.toDataURL('image/png')
+  a.download = 'face-paint-template.png'
+  a.click()
+}
 
 export default function AdminPage() {
   const [designs, setDesigns] = useState<Design[]>([])
@@ -26,7 +38,10 @@ export default function AdminPage() {
     if (data) setDesigns(data)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    supabase.from('designs').select('*').order('created_at', { ascending: false })
+      .then(({ data }) => { if (data) setDesigns(data) })
+  }, [])
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -74,7 +89,17 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
-      <h1 className="text-2xl font-bold mb-6">管理画面 — 絵柄登録</h1>
+      <h1 className="text-2xl font-bold mb-2">管理画面 — 絵柄登録</h1>
+      <div className="text-sm text-gray-600 mb-6 max-w-md space-y-1">
+        <p>頬・目尻〜こめかみ：透過PNGを1枚。自動で範囲に収まり、右側は左右反転で配置されます（左側に置いたときの向きで作成）。</p>
+        <p>
+          全顔：展開図テンプレートに合わせて描いた1024×1024の透過PNG。
+          <button type="button" onClick={downloadTemplate} className="ml-1 text-pink-600 underline">
+            テンプレートをダウンロード
+          </button>
+          （ピンク枠＝頬、青枠＝目尻〜こめかみの配置範囲）
+        </p>
+      </div>
 
       <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow p-6 mb-8 max-w-md">
         <div className="space-y-4">
@@ -136,7 +161,7 @@ export default function AdminPage() {
                 <Image src={d.image_url} alt={d.name} fill className="object-contain" />
               </div>
               <p className="text-sm font-medium truncate">{d.name}</p>
-              <p className="text-xs text-gray-400">{d.type === 'cheek' ? '頬' : d.type === 'eye' ? '目元' : '全顔'}</p>
+              <p className="text-xs text-gray-400">{DESIGN_TYPE_LABEL[d.type]}</p>
               <button
                 onClick={() => handleDelete(d)}
                 className="text-xs text-red-400 hover:text-red-600 text-left"
