@@ -3,7 +3,7 @@
 // 開発用: カメラなしで、顔写真に本番と同じパイプライン（regions → renderer）を当てて確認する
 import { useEffect, useRef, useState } from 'react'
 import { createFaceLandmarker, LandmarkSmoother } from '@/lib/faceTracker'
-import { prepareTexture, drawTemplate, type Side } from '@/lib/regions'
+import { prepareTexture, drawTemplate, recommendedAspect, type Side } from '@/lib/regions'
 import { drawWarpedTexture } from '@/lib/renderer'
 import type { DesignType } from '@/types'
 
@@ -13,15 +13,18 @@ const CASES: { type: DesignType; side: Side }[] = [
   { type: 'full', side: 'left' },
 ]
 
-/** 向きが分かるテスト絵柄：「L→」と矢印 */
-function makeTestImage(): Promise<HTMLImageElement> {
+/** 向きが分かるテスト絵柄：推奨比率の矩形枠＋楕円＋「L→」 */
+function makeTestImage(aspect: number): Promise<HTMLImageElement> {
   const c = document.createElement('canvas')
-  c.width = 300; c.height = 200
+  const W = 300, H = Math.round(300 * aspect)
+  c.width = W; c.height = H
   const g = c.getContext('2d')!
+  g.fillStyle = 'rgba(220,30,60,0.35)'
+  g.fillRect(0, 0, W, H)
   g.fillStyle = 'rgba(220,30,60,0.95)'
-  g.beginPath(); g.ellipse(150, 100, 145, 95, 0, 0, Math.PI * 2); g.fill()
+  g.beginPath(); g.ellipse(W / 2, H / 2, W / 2 - 6, H / 2 - 6, 0, 0, Math.PI * 2); g.fill()
   g.fillStyle = '#1e40af'; g.font = 'bold 110px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'
-  g.fillText('L→', 150, 105)
+  g.fillText('L→', W / 2, H / 2)
   const img = new Image()
   img.src = c.toDataURL()
   return new Promise(r => { img.onload = () => r(img) })
@@ -51,7 +54,10 @@ export default function DebugPage() {
       if (!res.faceLandmarks[0]) { setMsg('no face'); return }
       const w = face.naturalWidth, h = face.naturalHeight
       const pts = new LandmarkSmoother().update(res.faceLandmarks[0], w, h)
-      const test = await makeTestImage()
+      const tests = {
+        cheek: await makeTestImage(recommendedAspect('cheek')),
+        eye: await makeTestImage(recommendedAspect('eye')),
+      }
       const tmpl = await makeTemplateImage()
 
       // 顔周辺だけ切り出して表示
@@ -68,7 +74,7 @@ export default function DebugPage() {
         full.width = w; full.height = h
         const ctx = full.getContext('2d')!
         ctx.drawImage(face, 0, 0)
-        const tex = prepareTexture(cs.type === 'full' ? tmpl : test, cs.type, cs.side)
+        const tex = prepareTexture(cs.type === 'full' ? tmpl : tests[cs.type], cs.type, cs.side)
         const layer = document.createElement('canvas')
         layer.width = w; layer.height = h
         drawWarpedTexture(layer.getContext('2d')!, tex, pts)

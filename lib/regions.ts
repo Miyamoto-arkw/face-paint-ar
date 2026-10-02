@@ -18,21 +18,27 @@ interface Rect { x: number; y: number; w: number; h: number }
  * 調整するときはこの数値だけを触ればよい。
  */
 const LEFT_SIDE_RECTS: Record<Exclude<DesignType, 'full'>, Rect> = {
-  // 頬骨の下〜口角の上、鼻翼の外側〜フェイスライン手前
-  cheek: { x: 0.63, y: 0.47, w: 0.29, h: 0.21 },
-  // 目尻の外側〜こめかみ〜耳の手前
-  // ※顔メッシュは耳の手前（フェイスライン）までなので、耳そのものには描けない
-  eye: { x: 0.75, y: 0.22, w: 0.245, h: 0.28 },
+  // 目の下〜口角の少し下、鼻翼の横〜フェイスラインまで（上下に大きめ）
+  cheek: { x: 0.61, y: 0.42, w: 0.35, h: 0.36 },
+  // 目尻(u=0.72, v=0.376)を起点に、額側・頬側へ扇状に開く範囲（上下 約±50°）
+  // ※顔メッシュはフェイスラインまでなので、耳や髪の上には描けない
+  eye: { x: 0.73, y: 0.13, w: 0.265, h: 0.49 },
 }
 
-function regionRect(type: DesignType, side: Side): Rect {
-  if (type === 'full') return { x: 0, y: 0, w: 1, h: 1 }
+/** 矩形より絵柄が細いときに寄せる方向（ユーザーの左側基準）。目尻は目の側に寄せる */
+const ANCHOR_X: Record<Exclude<DesignType, 'full'>, 'start' | 'center'> = {
+  cheek: 'center',
+  eye: 'start',
+}
+
+/** 管理画面用：プリセットに一番ぴったり収まる絵柄の縦横比（高さ / 幅） */
+export function recommendedAspect(type: Exclude<DesignType, 'full'>): number {
   const r = LEFT_SIDE_RECTS[type]
-  return side === 'left' ? r : { ...r, x: 1 - r.x - r.w }
+  return (r.h * UV_ASPECT) / r.w
 }
 
 /** 画像を縦横比を保ったまま矩形内に収める（UV空間の縦横比補正込み） */
-function fitContain(rect: Rect, imgW: number, imgH: number): Rect {
+function fitContain(rect: Rect, imgW: number, imgH: number, anchorX: 'start' | 'center'): Rect {
   // UV上で h/w = (imgH/imgW) / UV_ASPECT にすると実際の顔で元の比率になる
   const targetRatio = imgH / imgW / UV_ASPECT
   let w = rect.w
@@ -41,7 +47,23 @@ function fitContain(rect: Rect, imgW: number, imgH: number): Rect {
     h = rect.h
     w = h / targetRatio
   }
-  return { x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h }
+  const x = anchorX === 'start' ? rect.x : rect.x + (rect.w - w) / 2
+  return { x, y: rect.y + (rect.h - h) / 2, w, h }
+}
+
+const mirror = (r: Rect): Rect => ({ ...r, x: 1 - r.x - r.w })
+
+function regionRect(type: DesignType, side: Side): Rect {
+  if (type === 'full') return { x: 0, y: 0, w: 1, h: 1 }
+  const r = LEFT_SIDE_RECTS[type]
+  return side === 'left' ? r : mirror(r)
+}
+
+/** 絵柄を置く位置（UV）。左側で計算してから右側は鏡像にする */
+function placement(type: DesignType, side: Side, imgW: number, imgH: number): Rect {
+  if (type === 'full') return regionRect(type, side)
+  const p = fitContain(LEFT_SIDE_RECTS[type], imgW, imgH, ANCHOR_X[type])
+  return side === 'left' ? p : mirror(p)
 }
 
 export interface PreparedTexture {
@@ -66,7 +88,7 @@ export function prepareTexture(img: HTMLImageElement, type: DesignType, side: Si
   const iw = img.naturalWidth || img.width
   const ih = img.naturalHeight || img.height
   // 全顔はテンプレート準拠で展開図全体に引き伸ばす。ワンポイントは比率維持で収める
-  const place = type === 'full' ? regionRect(type, side) : fitContain(regionRect(type, side), iw, ih)
+  const place = placement(type, side, iw, ih)
 
   // 画面は鏡表示なので、テクスチャ上で左右反転して描くと画面上で「描いたとおり」に見える。
   // 右側は左側の鏡像にしたいので反転しない（= 画面上で反転して見える）。

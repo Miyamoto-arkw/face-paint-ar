@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
 import type { Design, DesignType } from '@/types'
 import { DESIGN_TYPE_LABEL } from '@/types'
-import { drawTemplate } from '@/lib/regions'
+import { drawTemplate, recommendedAspect } from '@/lib/regions'
 
 const TYPE_OPTIONS = (Object.keys(DESIGN_TYPE_LABEL) as DesignType[])
   .map(value => ({ value, label: DESIGN_TYPE_LABEL[value] }))
@@ -92,6 +92,11 @@ export default function AdminPage() {
       <h1 className="text-2xl font-bold mb-2">管理画面 — 絵柄登録</h1>
       <div className="text-sm text-gray-600 mb-6 max-w-md space-y-1">
         <p>頬・目尻〜こめかみ：透過PNGを1枚。自動で範囲に収まり、右側は左右反転で配置されます（左側に置いたときの向きで作成）。</p>
+        <p>
+          範囲いっぱいに使うには、推奨サイズ（幅×高さ）で作成してください：
+          頬 600×{Math.round(600 * recommendedAspect('cheek'))}px、
+          目尻〜こめかみ 400×{Math.round(400 * recommendedAspect('eye'))}px（左端が目尻側）
+        </p>
         <p>
           全顔：展開図テンプレートに合わせて描いた1024×1024の透過PNG。
           <button type="button" onClick={downloadTemplate} className="ml-1 text-pink-600 underline">
