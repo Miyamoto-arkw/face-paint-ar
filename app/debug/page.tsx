@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createFaceLandmarker, LandmarkSmoother } from '@/lib/faceTracker'
 import { prepareTexture, drawTemplate, recommendedAspect, type Side } from '@/lib/regions'
 import { drawWarpedTexture } from '@/lib/renderer'
+import { extendPoints } from '@/lib/extendedMesh'
 import type { DesignType } from '@/types'
 
 const CASES: { type: DesignType; side: Side }[] = [
@@ -53,7 +54,7 @@ export default function DebugPage() {
       const res = lmk.detectForVideo(face, performance.now())
       if (!res.faceLandmarks[0]) { setMsg('no face'); return }
       const w = face.naturalWidth, h = face.naturalHeight
-      const pts = new LandmarkSmoother().update(res.faceLandmarks[0], w, h)
+      const pts = extendPoints(new LandmarkSmoother().update(res.faceLandmarks[0], w, h))
       const tests = {
         cheek: await makeTestImage(recommendedAspect('cheek')),
         eye: await makeTestImage(recommendedAspect('eye')),
@@ -86,6 +87,13 @@ export default function DebugPage() {
         canvas.width = crop.w * 2; canvas.height = crop.h * 2
         canvas.getContext('2d')!.drawImage(full, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w * 2, crop.h * 2)
         canvas.dataset.triangles = String(tex.triangles.length)
+        if (cs.type === 'eye' && cs.side === 'left') {
+          tex.canvas.style.width = '300px'
+          tex.canvas.style.border = '1px solid #999'
+          tex.canvas.id = 'tex-debug'
+          document.getElementById('tex-debug')?.remove()
+          document.querySelector('main')!.appendChild(tex.canvas)
+        }
       })
       setMsg('done')
     })().catch(e => setMsg(String(e)))

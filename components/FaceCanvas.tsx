@@ -6,6 +6,7 @@ import type { Design } from '@/types'
 import { createFaceLandmarker, LandmarkSmoother } from '@/lib/faceTracker'
 import { prepareTexture, type PreparedTexture, type Side } from '@/lib/regions'
 import { drawWarpedTexture } from '@/lib/renderer'
+import { extendPoints } from '@/lib/extendedMesh'
 
 export type BlendMode = 'multiply' | 'source-over'
 
@@ -79,7 +80,7 @@ export default function FaceCanvas({ design, side, blend, opacity }: Props) {
       const result = landmarker.detectForVideo(video, performance.now())
       const lm = result.faceLandmarks[0]
       if (lm) {
-        pointsRef.current = smootherRef.current.update(lm, w, h)
+        pointsRef.current = extendPoints(smootherRef.current.update(lm, w, h), pointsRef.current ?? undefined)
         setFaceFound(true)
       } else {
         pointsRef.current = null

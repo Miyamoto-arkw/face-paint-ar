@@ -1,4 +1,5 @@
-import { CANONICAL_UV, FACE_TRIANGLES, UV_ASPECT } from './faceModel'
+import { UV_ASPECT } from './faceModel'
+import { EXT_TRIANGLES, EXT_UV } from './extendedMesh'
 import type { DesignType } from '@/types'
 
 /**
@@ -28,10 +29,12 @@ const LEFT_SIDE_REGIONS: Record<Exclude<DesignType, 'full'>, Polygon> = {
     [0.74, 0.38],  // 目尻のすぐ外（頂点）
     [0.745, 0.31], // 眉尻
     [0.50, 0.215], // 額の中央（眉間の上）
-    [0.50, 0.11],  // 額の中央・上
-    [0.76, 0.13],  // 額の外側・上
-    [0.995, 0.24], // こめかみ上
-    [0.995, 0.62], // フェイスライン（頬の高さ）
+    // 上辺は延長メッシュ（生え際付近）まで使う
+    [0.50, -0.02], // 額の中央・上
+    [0.80, -0.02], // 額の外側・上
+    [1.0, 0.12],   // こめかみ上
+    [1.0, 0.72],   // フェイスライン（頬の下の方）
+    [0.80, 0.56],  // 頬（目尻の下方向）
   ],
 }
 
@@ -123,10 +126,10 @@ export function prepareTexture(img: HTMLImageElement, type: DesignType, side: Si
   ctx.restore()
 
   // 絵柄の範囲に掛かる三角形だけを抽出（全顔は全部）
-  const triangles = FACE_TRIANGLES.filter(tri => {
+  const triangles = EXT_TRIANGLES.filter(tri => {
     if (type === 'full') return true
-    const us = tri.map(i => CANONICAL_UV[i][0])
-    const vs = tri.map(i => CANONICAL_UV[i][1])
+    const us = tri.map(i => EXT_UV[i][0])
+    const vs = tri.map(i => EXT_UV[i][1])
     return Math.max(...us) >= place.x && Math.min(...us) <= place.x + place.w
       && Math.max(...vs) >= place.y && Math.min(...vs) <= place.y + place.h
   })
@@ -134,8 +137,8 @@ export function prepareTexture(img: HTMLImageElement, type: DesignType, side: Si
   const srcPoints = new Float32Array(triangles.length * 6)
   triangles.forEach((tri, t) => {
     tri.forEach((i, k) => {
-      srcPoints[t * 6 + k * 2] = CANONICAL_UV[i][0] * S
-      srcPoints[t * 6 + k * 2 + 1] = CANONICAL_UV[i][1] * S
+      srcPoints[t * 6 + k * 2] = EXT_UV[i][0] * S
+      srcPoints[t * 6 + k * 2 + 1] = EXT_UV[i][1] * S
     })
   })
 
@@ -153,11 +156,11 @@ export function drawTemplate(ctx: CanvasRenderingContext2D, size: number) {
 
   ctx.strokeStyle = 'rgba(0,0,0,0.25)'
   ctx.lineWidth = 1
-  for (const [a, b, c] of FACE_TRIANGLES) {
+  for (const [a, b, c] of EXT_TRIANGLES) {
     ctx.beginPath()
-    ctx.moveTo(CANONICAL_UV[a][0] * size, CANONICAL_UV[a][1] * size)
-    ctx.lineTo(CANONICAL_UV[b][0] * size, CANONICAL_UV[b][1] * size)
-    ctx.lineTo(CANONICAL_UV[c][0] * size, CANONICAL_UV[c][1] * size)
+    ctx.moveTo(EXT_UV[a][0] * size, EXT_UV[a][1] * size)
+    ctx.lineTo(EXT_UV[b][0] * size, EXT_UV[b][1] * size)
+    ctx.lineTo(EXT_UV[c][0] * size, EXT_UV[c][1] * size)
     ctx.closePath()
     ctx.stroke()
   }
